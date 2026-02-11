@@ -54,14 +54,6 @@ streamlit run app.py
 * **3 Modelos Disponíveis**: Sonnet (recomendado), Haiku (rápido), Opus (máxima qualidade)
 * **Modo Debug**: Visualize a resposta bruta do modelo para verificar a qualidade
 
-## Vantagens do Anthropic Claude
-
-✅ **Qualidade Superior** - Um dos melhores modelos de IA do mundo
-✅ **Confiável** - Sem problemas de quota como outros provedores
-✅ **Rápido** - Respostas em poucos segundos
-✅ **Excelente em Português** - Treinado em múltiplos idiomas
-✅ **Free Tier Generoso** - Créditos iniciais gratuitos
-
 ## Notas
 
 * Os dados da sessão do Telegram são salvos localmente em arquivos `.session`

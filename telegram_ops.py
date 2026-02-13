@@ -1,6 +1,10 @@
+import os
+import logging
 from contextlib import asynccontextmanager
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
+
+logger = logging.getLogger(__name__)
 
 
 def get_session_name(phone_number):
@@ -53,9 +57,10 @@ async def sign_in_password(session_name, api_id, api_hash, password):
             return False, str(e)
 
 
-async def fetch_messages(session_name, api_id, api_hash, entity, limit):
+async def fetch_messages(session_name, api_id, api_hash, entity, limit, media_dir=None):
     async with telegram_client(session_name, api_id, api_hash) as client:
         msgs = []
+        media_files = []
         try:
             try:
                 chat = await client.get_entity(entity)
@@ -63,12 +68,39 @@ async def fetch_messages(session_name, api_id, api_hash, entity, limit):
                 raise Exception(f"Não foi possível encontrar o grupo/canal: {entity}")
 
             async for message in client.iter_messages(chat, limit=limit):
+                # Capturar mensagens de texto
                 if message.text:
                     msgs.append({
                         "date": message.date.strftime("%Y-%m-%d %H:%M:%S"),
                         "sender_id": message.sender_id,
                         "text": message.text,
                     })
-            return msgs, None
+
+                # Capturar vídeos enviados diretamente no chat
+                if media_dir and _is_video_message(message):
+                    try:
+                        path = await client.download_media(
+                            message, file=media_dir
+                        )
+                        if path and os.path.exists(path):
+                            media_files.append({
+                                "path": path,
+                                "date": message.date.strftime("%Y-%m-%d %H:%M:%S"),
+                                "filename": os.path.basename(path),
+                            })
+                    except Exception as e:
+                        logger.warning("Erro ao baixar mídia: %s", e)
+
+            return msgs, media_files, None
         except Exception as e:
-            return [], str(e)
+            return [], [], str(e)
+
+
+def _is_video_message(message):
+    if message.video:
+        return True
+    if message.document:
+        mime = getattr(message.document, "mime_type", "") or ""
+        if mime.startswith("video/"):
+            return True
+    return False

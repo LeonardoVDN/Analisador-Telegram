@@ -1,11 +1,23 @@
 import streamlit as st
 import pandas as pd
 from helpers import priority_sort_key, priority_color
+from report_export import generate_html_report
 
 
 def render(res):
     st.divider()
-    st.header("🎯 Dashboard Estratégico - Oportunidades de IA")
+
+    col_title, col_export = st.columns([3, 1])
+    with col_title:
+        st.header("🎯 Dashboard Estratégico - Oportunidades de IA")
+    with col_export:
+        html_report = generate_html_report(res)
+        st.download_button(
+            label="📄 Exportar Relatório",
+            data=html_report,
+            file_name="relatorio_ia.html",
+            mime="text/html",
+        )
 
     model_used = res.get("_model_used")
     if model_used:
@@ -20,8 +32,6 @@ def render(res):
     _render_metrics(problemas, solucoes, oportunidades, areas, links)
     st.divider()
     _render_problems(problemas)
-    st.divider()
-    _render_solutions(solucoes)
     st.divider()
     _render_opportunities(oportunidades)
     st.divider()
@@ -69,19 +79,6 @@ def _render_problems(problemas):
             st.markdown(f"**📝 Descrição:** {prob.get('problema', 'N/A')}")
 
 
-def _render_solutions(solucoes):
-    st.subheader("✅ Soluções com IA Já Implementadas")
-    if not solucoes:
-        st.info("Nenhuma solução com IA mencionada nas mensagens.")
-        return
-
-    for i, sol in enumerate(solucoes, 1):
-        with st.expander(f"✅ Solução {i}: {sol.get('solucao', 'N/A')}", expanded=True):
-            st.markdown(f"**🎯 Problema resolvido:** {sol.get('problema_resolvido', 'N/A')}")
-            st.markdown(f"**📊 Resultado:** {sol.get('resultado', 'N/A')}")
-            st.markdown(f"**🛠️ Ferramenta:** {sol.get('ferramenta', 'N/A')}")
-
-
 def _render_opportunities(oportunidades):
     st.subheader("💡 Oportunidades de Automação com IA")
     if not oportunidades:
@@ -120,7 +117,7 @@ def _render_areas(areas, problemas):
             {"Área": area, "Problemas Identificados": count}
             for area, count in sorted(area_count.items(), key=lambda x: x[1], reverse=True)
         ])
-        st.dataframe(df_areas, use_container_width=True)
+        st.dataframe(df_areas, width="stretch")
     else:
         st.write(", ".join(areas))
 
@@ -166,7 +163,7 @@ def _render_links(links):
 def _render_raw_data():
     with st.expander("📄 Ver dados brutos (Mensagens originais)"):
         df = pd.DataFrame(st.session_state.get("messages_data", []))
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width="stretch")
 
 
 def _render_debug(res):

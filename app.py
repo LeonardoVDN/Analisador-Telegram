@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import tempfile
 import warnings
 
 from helpers import (
@@ -17,6 +18,8 @@ from telegram_ops import (
     fetch_messages,
 )
 from claude_analysis import CLAUDE_MODELS, analyze_with_claude
+from media_processing import extract_video_urls, process_all_media
+from data_preparation import prepare_analysis_input, get_media_summary
 import dashboard
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -25,6 +28,10 @@ st.set_page_config(page_title="Telegram Group Analyze MVP", layout="wide")
 
 if "messages_data" not in st.session_state:
     st.session_state.messages_data = []
+if "media_files" not in st.session_state:
+    st.session_state.media_files = []
+if "transcriptions" not in st.session_state:
+    st.session_state.transcriptions = []
 if "analysis_results" not in st.session_state:
     st.session_state.analysis_results = None
 if "client_state" not in st.session_state:
@@ -144,35 +151,110 @@ if st.session_state.client_state == "connected":
     with col2:
         msg_limit = st.number_input("Qtd. Mensagens", min_value=10, max_value=2000, value=100)
 
+    # --- ETAPA 1: Baixar Mensagens ---
     if st.button("📥 Baixar Mensagens"):
         if not target_chat:
             st.error("Informe o grupo alvo!")
         else:
-            with st.spinner("Baixando mensagens do Telegram..."):
+            with st.spinner("Baixando mensagens e mídias do Telegram..."):
                 try:
-                    msgs, err = run_async_in_thread(
-                        fetch_messages, session_name, api_id, api_hash, target_chat, msg_limit
+                    media_tmp = tempfile.mkdtemp(prefix="tg_downloads_")
+                    msgs, media_files, err = run_async_in_thread(
+                        fetch_messages, session_name, api_id, api_hash,
+                        target_chat, msg_limit, media_tmp
                     )
                     if err:
                         st.error(f"Erro ao baixar mensagens: {err}")
                     else:
-                        st.success(f"{len(msgs)} mensagens baixadas!")
                         st.session_state.messages_data = msgs
+                        st.session_state.media_files = media_files
+                        st.session_state.transcriptions = []
+
+                        video_urls = extract_video_urls(msgs)
+                        st.success(
+                            f"{len(msgs)} mensagens baixadas! "
+                            f"{len(media_files)} vídeos do chat + "
+                            f"{len(video_urls)} links de vídeo encontrados."
+                        )
                 except Exception as e:
                     st.error(f"Erro crítico: {e}")
 
     if st.session_state.get("messages_data"):
-        st.write(f"Mensagens carregadas: {len(st.session_state.messages_data)}")
+        msgs_count = len(st.session_state.messages_data)
+        media_count = len(st.session_state.media_files)
+        video_urls = extract_video_urls(st.session_state.messages_data)
+        total_videos = media_count + len(video_urls)
 
+        st.write(f"Mensagens carregadas: {msgs_count}")
+
+        # --- ETAPA 2: Processar Mídias (opcional) ---
+        if total_videos > 0:
+            st.divider()
+            st.subheader("🎬 Processamento de Mídias")
+            st.caption(
+                f"{len(video_urls)} links de vídeo + {media_count} vídeos do chat = "
+                f"{total_videos} vídeos para processar"
+            )
+
+            if st.button("🎙️ Processar Vídeos (Baixar + Transcrever)"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
+                def update_progress(current, total, message):
+                    progress_bar.progress(current / total)
+                    status_text.text(f"[{current}/{total}] {message}")
+
+                with st.spinner("Processando vídeos..."):
+                    try:
+                        transcriptions = process_all_media(
+                            st.session_state.messages_data,
+                            st.session_state.media_files,
+                            progress_callback=update_progress,
+                        )
+                        st.session_state.transcriptions = transcriptions
+                        progress_bar.progress(1.0)
+
+                        summary = get_media_summary(transcriptions)
+                        if summary:
+                            status_text.empty()
+                            st.success(
+                                f"Transcrição concluída! "
+                                f"{summary['total_transcribed']} vídeos transcritos "
+                                f"({summary['from_links']} de links, "
+                                f"{summary['from_telegram']} do Telegram)."
+                            )
+                        else:
+                            status_text.empty()
+                            st.warning("Nenhum vídeo pôde ser transcrito.")
+                    except Exception as e:
+                        st.error(f"Erro no processamento de mídias: {e}")
+
+            if st.session_state.get("transcriptions"):
+                with st.expander("Ver transcrições", expanded=False):
+                    for t in st.session_state.transcriptions:
+                        st.markdown(f"**{t['origin']}** ({t['date']})")
+                        st.text(t["transcription"][:500])
+                        st.divider()
+
+        # --- ETAPA 3: Analisar com IA ---
+        st.divider()
         if st.button("🤖 Analisar com IA"):
             claude_valid, claude_error = validate_claude_key(claude_key)
             if not claude_valid:
                 st.error(claude_error)
             else:
+                prepared_text = prepare_analysis_input(
+                    st.session_state.messages_data,
+                    st.session_state.get("transcriptions", []),
+                )
                 with st.spinner(f"Analisando com {claude_model}..."):
                     status_box = st.empty()
                     analysis = analyze_with_claude(
-                        st.session_state.messages_data, claude_key, claude_model, status_box
+                        st.session_state.messages_data,
+                        claude_key,
+                        claude_model,
+                        status_box,
+                        prepared_text=prepared_text,
                     )
                     if "error" in analysis:
                         st.error(f"Erro na análise: {analysis['error']}")
@@ -180,7 +262,12 @@ if st.session_state.client_state == "connected":
                         st.session_state.analysis_results = analysis
                         status_box.empty()
                         model_used = analysis.get("_model_used", "desconhecido")
-                        st.success(f"✅ Análise concluída com sucesso usando o modelo **{model_used}**!")
+                        has_videos = len(st.session_state.get("transcriptions", [])) > 0
+                        extra = " (com transcrições de vídeos)" if has_videos else ""
+                        st.success(
+                            f"✅ Análise concluída com sucesso usando o modelo "
+                            f"**{model_used}**!{extra}"
+                        )
 
 if st.session_state.get("analysis_results"):
     dashboard.render(st.session_state.analysis_results)

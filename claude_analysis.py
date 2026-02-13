@@ -4,7 +4,7 @@ from anthropic import Anthropic
 
 logger = logging.getLogger(__name__)
 
-MAX_PROMPT_CHARS = 4000
+MAX_PROMPT_CHARS = 12000
 
 CLAUDE_MODELS = [
     "claude-sonnet-4-5-20250929",
@@ -16,6 +16,8 @@ CLAUDE_MODELS = [
 ANALYSIS_PROMPT_TEMPLATE = """Você é um analista de negócios especializado em identificar oportunidades de automação com IA em empresas.
 
 CONTEXTO: Este grupo discute PROBLEMAS REAIS DO NEGÓCIO e como usar IA para resolvê-los.
+Os dados abaixo incluem mensagens de texto E transcrições de vídeos/reels compartilhados no grupo.
+Analise AMBOS com o mesmo peso — os vídeos frequentemente contêm relatos detalhados de problemas e soluções.
 
 ═══════════════════════════════════════════════════════════════════
 
@@ -142,18 +144,26 @@ RESPONDA APENAS COM JSON VÁLIDO (sem comentários, sem ```):
 LEMBRE-SE: Foque em PROBLEMAS DE NEGÓCIO, não problemas técnicos com IA."""
 
 
-def analyze_with_claude(messages, api_key, model, status_placeholder):
+def analyze_with_claude(messages, api_key, model, status_placeholder, prepared_text=None):
     client = Anthropic(api_key=api_key)
 
-    text_blob = "\n".join([f"- {m['text']}" for m in messages])
-    truncated_input = text_blob[:MAX_PROMPT_CHARS]
-
-    if len(text_blob) > MAX_PROMPT_CHARS:
-        chars_removed = len(text_blob) - MAX_PROMPT_CHARS
-        status_placeholder.warning(
-            f"⚠️ Mensagens muito longas! Analisando apenas os primeiros {MAX_PROMPT_CHARS} "
-            f"caracteres ({chars_removed} caracteres ignorados)."
-        )
+    if prepared_text:
+        truncated_input = prepared_text[:MAX_PROMPT_CHARS]
+        if len(prepared_text) > MAX_PROMPT_CHARS:
+            chars_removed = len(prepared_text) - MAX_PROMPT_CHARS
+            status_placeholder.warning(
+                f"⚠️ Conteúdo muito longo! Analisando apenas os primeiros {MAX_PROMPT_CHARS} "
+                f"caracteres ({chars_removed} caracteres ignorados)."
+            )
+    else:
+        text_blob = "\n".join([f"- {m['text']}" for m in messages])
+        truncated_input = text_blob[:MAX_PROMPT_CHARS]
+        if len(text_blob) > MAX_PROMPT_CHARS:
+            chars_removed = len(text_blob) - MAX_PROMPT_CHARS
+            status_placeholder.warning(
+                f"⚠️ Mensagens muito longas! Analisando apenas os primeiros {MAX_PROMPT_CHARS} "
+                f"caracteres ({chars_removed} caracteres ignorados)."
+            )
 
     prompt = ANALYSIS_PROMPT_TEMPLATE.format(messages=truncated_input)
 
